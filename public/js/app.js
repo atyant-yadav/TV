@@ -77,26 +77,30 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-// Translate text using LibreTranslate API (free, no API key needed)
-async function translateText(text, targetLang) {
+// Translate text using MyMemory Translation API (free, no CORS issues)
+async function translateText(text, targetLang, sourceLang = 'auto') {
     if (targetLang === 'en' || !text) return text;
 
     try {
-        const response = await fetch('https://libretranslate.de/translate', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                q: text,
-                source: 'auto',
-                target: targetLang,
-                format: 'text'
-            })
-        });
+        // Encode text for URL
+        const encodedText = encodeURIComponent(text);
+        // Use auto-detect for source language
+        const langPair = sourceLang === 'auto' ? `autodetect|${targetLang}` : `${sourceLang}|${targetLang}`;
+        const response = await fetch(
+            `https://api.mymemory.translated.net/get?q=${encodedText}&langpair=${langPair}`,
+            {
+                method: 'GET',
+                headers: {
+                    'Accept': 'application/json'
+                }
+            }
+        );
 
         const data = await response.json();
-        return data.translatedText || text;
+        if (data.responseStatus === 200 && data.responseData) {
+            return data.responseData.translatedText || text;
+        }
+        return text;
     } catch (err) {
         console.log('Translation failed:', err);
         return text;
