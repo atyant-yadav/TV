@@ -585,6 +585,64 @@ function enableYouTubeControls() {
     }
 }
 
+// Show error when iframe fails to load
+function showIframeError(mediaType, url) {
+    const playerDiv = document.getElementById('player');
+
+    const errorDiv = document.createElement('div');
+    errorDiv.style.cssText = `
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(220, 38, 38, 0.95);
+        color: white;
+        padding: 25px;
+        border-radius: 12px;
+        text-align: center;
+        max-width: 80%;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    `;
+
+    const sourceNames = {
+        'spotify': 'Spotify',
+        'vimeo': 'Vimeo',
+        'soundcloud': 'SoundCloud',
+        'dailymotion': 'Dailymotion',
+        'twitch': 'Twitch',
+        'generic': 'Media'
+    };
+
+    errorDiv.innerHTML = `
+        <div style="font-size: 2rem; margin-bottom: 10px;">⚠️</div>
+        <div style="font-size: 1.2rem; font-weight: 600; margin-bottom: 10px;">
+            Failed to Load ${sourceNames[mediaType] || 'Media'}
+        </div>
+        <div style="font-size: 0.9rem; line-height: 1.5; margin-bottom: 15px;">
+            ${mediaType === 'spotify' ?
+                'This may be due to browser privacy settings blocking third-party cookies.<br>Try enabling cookies for Spotify or use a different browser.' :
+                'This content may be restricted or unavailable.'
+            }
+        </div>
+        <button onclick="this.parentElement.remove()" style="
+            background: rgba(255,255,255,0.2);
+            border: 1px solid white;
+            color: white;
+            padding: 8px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9rem;
+        ">Dismiss</button>
+        <div style="margin-top: 15px; font-size: 0.75rem; opacity: 0.8;">
+            Firefox users: Storage Access API warnings are normal
+        </div>
+    `;
+
+    playerDiv.appendChild(errorDiv);
+
+    console.error(`Failed to load ${mediaType} from: ${url}`);
+}
+
 // Load generic iframe (for non-YouTube content)
 function loadGenericIframe(url) {
     const playerDiv = document.getElementById('player');
@@ -648,9 +706,21 @@ function loadGenericIframe(url) {
     iframe.width = '100%';
     iframe.height = '100%';
     iframe.setAttribute('frameborder', '0');
+    iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-presentation allow-popups allow-popups-to-escape-sandbox');
     iframe.allow = 'autoplay; encrypted-media; fullscreen; picture-in-picture';
     iframe.allowFullscreen = true;
     iframe.style.cssText = 'position: absolute; top: 0; left: 0; width: 100%; height: 100%;';
+
+    // Handle iframe load errors
+    iframe.addEventListener('error', () => {
+        console.error('Failed to load media iframe');
+        showIframeError(mediaType, url);
+    });
+
+    // Log successful load
+    iframe.addEventListener('load', () => {
+        console.log(`${mediaType} iframe loaded successfully`);
+    });
 
     playerDiv.appendChild(iframe);
 
@@ -1020,81 +1090,30 @@ const isIOSSafari = () => {
     return iOS && webkit && notChrome;
 };
 
-// Handle visibility change for iOS Safari
+// Handle visibility change - useful for resuming playback when returning to page
 document.addEventListener('visibilitychange', () => {
-    console.log('Visibility changed:', document.hidden ? 'hidden' : 'visible');
-
-    if (player && player.getPlayerState) {
+    if (!document.hidden && player && player.getPlayerState) {
         const playerState = player.getPlayerState();
-
-        if (!document.hidden && playerState === YT.PlayerState.PLAYING) {
-            console.log('Page visible, ensuring playback continues');
+        if (playerState === YT.PlayerState.PLAYING) {
             updateMediaSessionPosition();
-        } else if (document.hidden && playerState === YT.PlayerState.PLAYING) {
-            console.log('Page hidden - iOS background audio active');
-            const videoData = player.getVideoData();
-            if (videoData && videoData.video_id) {
-                updateMediaSession(videoData);
-            }
         }
     }
 });
 
-// iOS Safari: Handle page hide/show events
-window.addEventListener('pagehide', () => {
-    console.log('Page hide event');
-});
-
-window.addEventListener('pageshow', () => {
-    console.log('Page show event');
-    if (player && player.getPlayerState && player.getPlayerState() === YT.PlayerState.PLAYING) {
-        updateMediaSessionPosition();
-    }
-});
-
-// iOS Safari: Initialize audio context for background audio
-let audioContextInitialized = false;
-
-function initializeAudioContextForIOS() {
-    if (isIOSSafari() && !audioContextInitialized) {
-        try {
-            const AudioContext = window.AudioContext || window.webkitAudioContext;
-            if (AudioContext) {
-                const audioCtx = new AudioContext();
-                audioCtx.resume().then(() => {
-                    console.log('AudioContext initialized for iOS background audio');
-                    audioContextInitialized = true;
-
-                    setInterval(() => {
-                        if (audioCtx.state === 'suspended') {
-                            audioCtx.resume();
-                        }
-                    }, 5000);
-                });
-            }
-        } catch (err) {
-            console.log('AudioContext initialization failed:', err);
-        }
-    }
-}
-
-document.addEventListener('click', initializeAudioContextForIOS, { once: true });
-document.addEventListener('touchstart', initializeAudioContextForIOS, { once: true });
-
-// iOS Safari specific enhancements with PiP support
+// iOS Safari - Be honest about limitations
 if (isIOSSafari()) {
-    console.log('iOS Safari detected - Background audio limitations apply');
+    console.log('iOS Safari detected - Background audio NOT supported when screen locks');
 
-    // Show iOS user instructions
-    const showIOSInstructions = () => {
-        const instructionDiv = document.createElement('div');
-        instructionDiv.id = 'iosInstructions';
-        instructionDiv.style.cssText = `
+    // Show honest iOS warning
+    const showIOSWarning = () => {
+        const warningDiv = document.createElement('div');
+        warningDiv.id = 'iosWarning';
+        warningDiv.style.cssText = `
             position: fixed;
             bottom: 80px;
             left: 50%;
             transform: translateX(-50%);
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #f59e0b 0%, #dc2626 100%);
             color: white;
             padding: 15px 25px;
             border-radius: 12px;
@@ -1105,70 +1124,46 @@ if (isIOSSafari()) {
             font-size: 0.9rem;
             animation: slideUp 0.3s ease-out;
         `;
-        instructionDiv.innerHTML = `
-            <div style="font-weight: 600; margin-bottom: 8px;">📱 iOS Tip</div>
-            <div style="font-size: 0.85rem; line-height: 1.4;">
-                For audio to continue when screen locks:<br>
-                Keep screen ON or use <strong>Picture-in-Picture</strong> mode
+        warningDiv.innerHTML = `
+            <div style="font-weight: 600; margin-bottom: 8px;">⚠️ iOS Limitation</div>
+            <div style="font-size: 0.85rem; line-height: 1.5;">
+                Audio WILL STOP when you lock the screen.<br>
+                This is an iOS Safari restriction.<br>
+                <strong>Keep your screen ON while watching.</strong>
             </div>
-            <button id="dismissIOSTip" style="
+            <button id="dismissIOSWarning" style="
                 margin-top: 10px;
-                background: rgba(255,255,255,0.2);
+                background: rgba(255,255,255,0.25);
                 border: none;
                 color: white;
                 padding: 6px 16px;
                 border-radius: 6px;
                 cursor: pointer;
                 font-size: 0.8rem;
-            ">Got it</button>
+            ">I Understand</button>
         `;
 
-        document.body.appendChild(instructionDiv);
+        document.body.appendChild(warningDiv);
 
-        document.getElementById('dismissIOSTip').addEventListener('click', () => {
-            instructionDiv.remove();
-            localStorage.setItem('iosInstructionSeen', 'true');
+        document.getElementById('dismissIOSWarning').addEventListener('click', () => {
+            warningDiv.remove();
+            localStorage.setItem('iosWarningSeen', 'true');
         });
 
-        // Auto-dismiss after 15 seconds
+        // Auto-dismiss after 20 seconds
         setTimeout(() => {
-            if (instructionDiv.parentElement) {
-                instructionDiv.remove();
+            if (warningDiv.parentElement) {
+                warningDiv.remove();
             }
-        }, 15000);
+        }, 20000);
     };
 
-    // Show instruction once per session
-    if (!localStorage.getItem('iosInstructionSeen')) {
-        setTimeout(showIOSInstructions, 3000);
+    // Show warning once per session
+    if (!localStorage.getItem('iosWarningSeen')) {
+        setTimeout(showIOSWarning, 3000);
     }
 
-    // Try to enable Picture-in-Picture when page becomes hidden
-    document.addEventListener('visibilitychange', async () => {
-        if (document.hidden && player && player.getPlayerState && player.getPlayerState() === YT.PlayerState.PLAYING) {
-            console.log('iOS: Page hidden - attempting PiP mode');
-
-            // Get the iframe element
-            const iframe = document.querySelector('#player iframe');
-            if (iframe && document.pictureInPictureEnabled) {
-                try {
-                    // Try to enter PiP mode
-                    if (!document.pictureInPictureElement) {
-                        // Note: This may not work with YouTube iframe due to CORS
-                        // But we try anyway
-                        const video = iframe.contentDocument?.querySelector('video');
-                        if (video && video.requestPictureInPicture) {
-                            await video.requestPictureInPicture();
-                            console.log('PiP mode activated');
-                        }
-                    }
-                } catch (err) {
-                    console.log('PiP not available:', err.message);
-                }
-            }
-        }
-    });
-
+    // Update Media Session for quick resume when unlocking
     setInterval(() => {
         if (player && player.getPlayerState && player.getPlayerState() === YT.PlayerState.PLAYING) {
             const videoData = player.getVideoData();
@@ -1180,4 +1175,4 @@ if (isIOSSafari()) {
     }, 3000);
 }
 
-console.log('iOS Background Audio: ' + (isIOSSafari() ? 'LIMITED (iOS restriction)' : 'Supported'));
+console.log('iOS Background Audio: ' + (isIOSSafari() ? 'NOT SUPPORTED' : 'Supported'));
