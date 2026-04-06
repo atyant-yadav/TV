@@ -79,7 +79,7 @@ function escapeHtml(text) {
 
 // Translate text using MyMemory Translation API (free, no CORS issues)
 async function translateText(text, targetLang, sourceLang = 'auto') {
-    if (targetLang === 'en' || !text) return text;
+    if (!text) return text;
 
     try {
         // Encode text for URL
@@ -121,9 +121,9 @@ async function addChatMessage(message, type = 'user', sender = null, originalMes
     if (type === 'system') {
         messageDiv.textContent = message;
     } else {
-        // Translate message if needed and not own message
+        // Translate message if it's from another user (auto-detects source language)
         let displayMessage = message;
-        if (!isOwnMessage && userLanguage !== 'en') {
+        if (!isOwnMessage) {
             displayMessage = await translateText(message, userLanguage);
         }
 
@@ -142,8 +142,8 @@ async function addChatMessage(message, type = 'user', sender = null, originalMes
         messageDiv.appendChild(messageSpan);
         messageDiv.appendChild(timestampSpan);
 
-        // Show original if translated
-        if (displayMessage !== message && userLanguage !== 'en') {
+        // Show original if message was translated
+        if (displayMessage !== message) {
             const originalSpan = document.createElement('div');
             originalSpan.style.fontSize = '0.75rem';
             originalSpan.style.color = '#9ca3af';
