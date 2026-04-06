@@ -1081,9 +1081,93 @@ function initializeAudioContextForIOS() {
 document.addEventListener('click', initializeAudioContextForIOS, { once: true });
 document.addEventListener('touchstart', initializeAudioContextForIOS, { once: true });
 
-// iOS Safari specific enhancements
+// iOS Safari specific enhancements with PiP support
 if (isIOSSafari()) {
-    console.log('iOS Safari detected - Enhanced background audio enabled');
+    console.log('iOS Safari detected - Background audio limitations apply');
+
+    // Show iOS user instructions
+    const showIOSInstructions = () => {
+        const instructionDiv = document.createElement('div');
+        instructionDiv.id = 'iosInstructions';
+        instructionDiv.style.cssText = `
+            position: fixed;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px 25px;
+            border-radius: 12px;
+            z-index: 999;
+            max-width: 90%;
+            text-align: center;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            font-size: 0.9rem;
+            animation: slideUp 0.3s ease-out;
+        `;
+        instructionDiv.innerHTML = `
+            <div style="font-weight: 600; margin-bottom: 8px;">📱 iOS Tip</div>
+            <div style="font-size: 0.85rem; line-height: 1.4;">
+                For audio to continue when screen locks:<br>
+                Keep screen ON or use <strong>Picture-in-Picture</strong> mode
+            </div>
+            <button id="dismissIOSTip" style="
+                margin-top: 10px;
+                background: rgba(255,255,255,0.2);
+                border: none;
+                color: white;
+                padding: 6px 16px;
+                border-radius: 6px;
+                cursor: pointer;
+                font-size: 0.8rem;
+            ">Got it</button>
+        `;
+
+        document.body.appendChild(instructionDiv);
+
+        document.getElementById('dismissIOSTip').addEventListener('click', () => {
+            instructionDiv.remove();
+            localStorage.setItem('iosInstructionSeen', 'true');
+        });
+
+        // Auto-dismiss after 15 seconds
+        setTimeout(() => {
+            if (instructionDiv.parentElement) {
+                instructionDiv.remove();
+            }
+        }, 15000);
+    };
+
+    // Show instruction once per session
+    if (!localStorage.getItem('iosInstructionSeen')) {
+        setTimeout(showIOSInstructions, 3000);
+    }
+
+    // Try to enable Picture-in-Picture when page becomes hidden
+    document.addEventListener('visibilitychange', async () => {
+        if (document.hidden && player && player.getPlayerState && player.getPlayerState() === YT.PlayerState.PLAYING) {
+            console.log('iOS: Page hidden - attempting PiP mode');
+
+            // Get the iframe element
+            const iframe = document.querySelector('#player iframe');
+            if (iframe && document.pictureInPictureEnabled) {
+                try {
+                    // Try to enter PiP mode
+                    if (!document.pictureInPictureElement) {
+                        // Note: This may not work with YouTube iframe due to CORS
+                        // But we try anyway
+                        const video = iframe.contentDocument?.querySelector('video');
+                        if (video && video.requestPictureInPicture) {
+                            await video.requestPictureInPicture();
+                            console.log('PiP mode activated');
+                        }
+                    }
+                } catch (err) {
+                    console.log('PiP not available:', err.message);
+                }
+            }
+        }
+    });
 
     setInterval(() => {
         if (player && player.getPlayerState && player.getPlayerState() === YT.PlayerState.PLAYING) {
@@ -1094,25 +1178,6 @@ if (isIOSSafari()) {
             }
         }
     }, 3000);
-
-    window.addEventListener('blur', () => {
-        console.log('Window blur (iOS) - maintaining playback');
-        if (player && player.getPlayerState && player.getPlayerState() === YT.PlayerState.PLAYING) {
-            setTimeout(() => {
-                const videoData = player.getVideoData();
-                if (videoData && videoData.video_id) {
-                    updateMediaSession(videoData);
-                }
-            }, 100);
-        }
-    });
-
-    window.addEventListener('focus', () => {
-        console.log('Window focus (iOS)');
-        if (player && player.getPlayerState && player.getPlayerState() === YT.PlayerState.PLAYING) {
-            updateMediaSessionPosition();
-        }
-    });
 }
 
-console.log('iOS Background Audio: ' + (isIOSSafari() ? 'ACTIVE' : 'Not needed'));
+console.log('iOS Background Audio: ' + (isIOSSafari() ? 'LIMITED (iOS restriction)' : 'Supported'));

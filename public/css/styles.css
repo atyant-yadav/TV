@@ -338,3 +338,15 @@ body {
 .icon-play::before { content: '▶'; }
 .icon-pause::before { content: '⏸'; }
 .icon-load::before { content: '📺'; }
+
+/* Animation for iOS instructions */
+@keyframes slideUp {
+    from {
+        opacity: 0;
+        transform: translateX(-50%) translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+    }
+}
