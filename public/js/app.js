@@ -108,7 +108,7 @@ async function translateText(text, targetLang, sourceLang = 'auto') {
 }
 
 // Add chat message to UI
-async function addChatMessage(message, type = 'user', sender = null, originalMessage = null) {
+async function addChatMessage(message, type = 'user', sender = null) {
     const chatMessages = document.getElementById('chatMessages');
     const messageDiv = document.createElement('div');
 
@@ -236,59 +236,87 @@ function onYouTubeIframeAPIReady() {
     });
 }
 
-// Media Session API for background audio control
+// Media Session API for background audio control (iOS Safari compatible)
 function updateMediaSession(videoData) {
     if ('mediaSession' in navigator) {
-        navigator.mediaSession.metadata = new MediaMetadata({
-            title: videoData.title || 'YouTube Sync Video',
-            artist: videoData.author || 'YouTube',
-            album: 'YouTube Sync',
-            artwork: [
-                { src: `https://i.ytimg.com/vi/${videoData.video_id}/default.jpg`, sizes: '120x90', type: 'image/jpeg' },
-                { src: `https://i.ytimg.com/vi/${videoData.video_id}/mqdefault.jpg`, sizes: '320x180', type: 'image/jpeg' },
-                { src: `https://i.ytimg.com/vi/${videoData.video_id}/hqdefault.jpg`, sizes: '480x360', type: 'image/jpeg' },
-                { src: `https://i.ytimg.com/vi/${videoData.video_id}/sddefault.jpg`, sizes: '640x480', type: 'image/jpeg' }
-            ]
-        });
-
-        navigator.mediaSession.setActionHandler('play', () => {
-            isLocalAction = true;
-            player.playVideo();
-            const currentTime = player.getCurrentTime();
-            socket.emit('play', {
-                videoId: player.getVideoData().video_id,
-                currentTime: currentTime
+        try {
+            navigator.mediaSession.metadata = new MediaMetadata({
+                title: videoData.title || 'YouTube Sync Video',
+                artist: videoData.author || 'YouTube',
+                album: 'YouTube Sync - Watch Together',
+                artwork: [
+                    { src: `https://i.ytimg.com/vi/${videoData.video_id}/default.jpg`, sizes: '120x90', type: 'image/jpeg' },
+                    { src: `https://i.ytimg.com/vi/${videoData.video_id}/mqdefault.jpg`, sizes: '320x180', type: 'image/jpeg' },
+                    { src: `https://i.ytimg.com/vi/${videoData.video_id}/hqdefault.jpg`, sizes: '480x360', type: 'image/jpeg' },
+                    { src: `https://i.ytimg.com/vi/${videoData.video_id}/sddefault.jpg`, sizes: '640x480', type: 'image/jpeg' },
+                    { src: `https://i.ytimg.com/vi/${videoData.video_id}/maxresdefault.jpg`, sizes: '1280x720', type: 'image/jpeg' }
+                ]
             });
-        });
 
-        navigator.mediaSession.setActionHandler('pause', () => {
-            isLocalAction = true;
-            player.pauseVideo();
-            socket.emit('pause');
-        });
+            // iOS Safari requires all action handlers to be set
+            navigator.mediaSession.setActionHandler('play', () => {
+                console.log('Media Session: Play action');
+                isLocalAction = true;
+                if (player && player.playVideo) {
+                    player.playVideo();
+                    const currentTime = player.getCurrentTime();
+                    socket.emit('play', {
+                        videoId: player.getVideoData().video_id,
+                        currentTime: currentTime
+                    });
+                }
+            });
 
-        navigator.mediaSession.setActionHandler('seekbackward', (details) => {
-            const skipTime = details.seekOffset || 10;
-            const newTime = Math.max(player.getCurrentTime() - skipTime, 0);
-            player.seekTo(newTime, true);
-            socket.emit('seek', newTime);
-        });
+            navigator.mediaSession.setActionHandler('pause', () => {
+                console.log('Media Session: Pause action');
+                isLocalAction = true;
+                if (player && player.pauseVideo) {
+                    player.pauseVideo();
+                    socket.emit('pause');
+                }
+            });
 
-        navigator.mediaSession.setActionHandler('seekforward', (details) => {
-            const skipTime = details.seekOffset || 10;
-            const newTime = Math.min(player.getCurrentTime() + skipTime, player.getDuration());
-            player.seekTo(newTime, true);
-            socket.emit('seek', newTime);
-        });
+            navigator.mediaSession.setActionHandler('seekbackward', (details) => {
+                console.log('Media Session: Seek backward');
+                if (player && player.getCurrentTime) {
+                    const skipTime = details.seekOffset || 10;
+                    const newTime = Math.max(player.getCurrentTime() - skipTime, 0);
+                    player.seekTo(newTime, true);
+                    socket.emit('seek', newTime);
+                }
+            });
 
-        // Update position state for lock screen
-        navigator.mediaSession.setPositionState({
-            duration: player.getDuration(),
-            playbackRate: player.getPlaybackRate(),
-            position: player.getCurrentTime()
-        });
+            navigator.mediaSession.setActionHandler('seekforward', (details) => {
+                console.log('Media Session: Seek forward');
+                if (player && player.getCurrentTime) {
+                    const skipTime = details.seekOffset || 10;
+                    const newTime = Math.min(player.getCurrentTime() + skipTime, player.getDuration());
+                    player.seekTo(newTime, true);
+                    socket.emit('seek', newTime);
+                }
+            });
 
-        console.log('Media Session API configured');
+            // Try to set position state (iOS Safari support varies)
+            try {
+                if (player && player.getDuration && player.getCurrentTime) {
+                    const duration = player.getDuration();
+                    const position = player.getCurrentTime();
+                    if (duration > 0 && position >= 0) {
+                        navigator.mediaSession.setPositionState({
+                            duration: duration,
+                            playbackRate: player.getPlaybackRate ? player.getPlaybackRate() : 1,
+                            position: position
+                        });
+                    }
+                }
+            } catch (err) {
+                console.log('Media Session position state not supported:', err);
+            }
+
+            console.log('Media Session API configured for iOS Safari');
+        } catch (err) {
+            console.error('Media Session API error:', err);
+        }
     }
 }
 
@@ -307,7 +335,7 @@ function updateMediaSessionPosition() {
     }
 }
 
-function onPlayerReady(event) {
+function onPlayerReady() {
     updateStatus('Connected and ready!', '✅');
 
     // Try to restore video state from localStorage if no server state
@@ -381,6 +409,9 @@ function onPlayerReady(event) {
             socket.emit('loadVideo', { videoId: videoId });
             updateStatus('YouTube video loaded!', '📺');
             document.getElementById('videoUrl').value = '';
+
+            // Re-enable play/pause buttons for YouTube
+            enableYouTubeControls();
             return;
         }
 
@@ -396,6 +427,9 @@ function onPlayerReady(event) {
                 socket.emit('loadPlaylist', { playlistId: playlistId });
                 updateStatus('YouTube playlist loaded!', '📺');
                 document.getElementById('videoUrl').value = '';
+
+                // Re-enable play/pause buttons for YouTube
+                enableYouTubeControls();
                 return;
             }
         }
@@ -535,10 +569,34 @@ function extractPlaylistId(url) {
     return match ? match[1] : null;
 }
 
+// Enable YouTube controls (play/pause buttons)
+function enableYouTubeControls() {
+    const playBtn = document.getElementById('play');
+    const pauseBtn = document.getElementById('pause');
+    if (playBtn) {
+        playBtn.disabled = false;
+        playBtn.style.opacity = '1';
+        playBtn.title = '';
+    }
+    if (pauseBtn) {
+        pauseBtn.disabled = false;
+        pauseBtn.style.opacity = '1';
+        pauseBtn.title = '';
+    }
+}
+
 // Load generic iframe (for non-YouTube content)
 function loadGenericIframe(url) {
-    const playerWrapper = document.querySelector('.player-wrapper');
     const playerDiv = document.getElementById('player');
+
+    // Stop YouTube player if it's active
+    if (player && player.stopVideo) {
+        try {
+            player.stopVideo();
+        } catch (e) {
+            console.log('Could not stop YouTube player:', e);
+        }
+    }
 
     // Detect media type
     let embedUrl = url;
@@ -582,21 +640,36 @@ function loadGenericIframe(url) {
         }
     }
 
-    // Create iframe
-    playerDiv.innerHTML = `
-        <iframe
-            src="${embedUrl}"
-            width="100%"
-            height="100%"
-            frameborder="0"
-            allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
-            allowfullscreen
-            style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;">
-        </iframe>
-    `;
+    // Destroy existing YouTube player and create iframe
+    playerDiv.innerHTML = '';
+
+    const iframe = document.createElement('iframe');
+    iframe.src = embedUrl;
+    iframe.width = '100%';
+    iframe.height = '100%';
+    iframe.setAttribute('frameborder', '0');
+    iframe.allow = 'autoplay; encrypted-media; fullscreen; picture-in-picture';
+    iframe.allowFullscreen = true;
+    iframe.style.cssText = 'position: absolute; top: 0; left: 0; width: 100%; height: 100%;';
+
+    playerDiv.appendChild(iframe);
 
     currentMediaType = mediaType;
     currentMediaSource = 'iframe';
+
+    // Disable play/pause buttons for iframe content (they won't work)
+    const playBtn = document.getElementById('play');
+    const pauseBtn = document.getElementById('pause');
+    if (playBtn) {
+        playBtn.disabled = true;
+        playBtn.style.opacity = '0.5';
+        playBtn.title = 'Play/pause controls not available for this media type';
+    }
+    if (pauseBtn) {
+        pauseBtn.disabled = true;
+        pauseBtn.style.opacity = '0.5';
+        pauseBtn.title = 'Play/pause controls not available for this media type';
+    }
 
     // Show info about media type
     const sourceNames = {
@@ -608,7 +681,9 @@ function loadGenericIframe(url) {
         'generic': 'External Media'
     };
 
-    updateStatus(`Loaded ${sourceNames[mediaType] || 'media'}`, '🎵');
+    updateStatus(`${sourceNames[mediaType] || 'Media'} loaded!`, '🎵');
+
+    console.log(`Loaded ${mediaType} media: ${embedUrl}`);
 
     return btoa(embedUrl).substring(0, 20); // Return unique ID
 }
@@ -670,6 +745,9 @@ socket.on('loadVideo', (data) => {
 
         // Save loaded video state
         saveVideoState(data.videoId, data.currentTime || 0, false);
+
+        // Re-enable YouTube controls
+        enableYouTubeControls();
     }
 });
 
@@ -682,6 +760,9 @@ socket.on('loadPlaylist', (data) => {
             index: data.index || 0
         });
         updateStatus('New playlist loaded', '📺');
+
+        // Re-enable YouTube controls
+        enableYouTubeControls();
     }
 });
 
@@ -715,25 +796,156 @@ socket.on('syncRequest', () => {
 });
 
 socket.on('syncResponse', (data) => {
-    if (player && data.videoId) {
+    // Handle YouTube content
+    if (player && data.videoId && !data.mediaSource) {
         player.loadVideoById({
             videoId: data.videoId,
             startSeconds: data.currentTime || 0
         });
 
         if (data.isPlaying) {
-            setTimeout(() => {
-                player.playVideo();
-                requestWakeLock();
-            }, 500);
-        }
+            // Strategy: Try muted autoplay first, then show unmute prompt
+            setTimeout(async () => {
+                try {
+                    // Mute first for autoplay compatibility
+                    player.mute();
+                    await player.playVideo();
+                    requestWakeLock();
 
-        updateStatus('Synced with existing session', '✅');
+                    // Show unmute button overlay
+                    showUnmutePrompt();
+                    updateStatus('Playing (muted - click to unmute)', '🔇');
+                } catch (error) {
+                    console.log('Autoplay blocked:', error);
+                    showPlayPrompt();
+                }
+            }, 1000);
+        } else {
+            updateStatus('Synced (paused)', '⏸️');
+        }
 
         // Save synced state to localStorage
         saveVideoState(data.videoId, data.currentTime || 0, data.isPlaying || false);
     }
+    // Handle non-YouTube media (Spotify, Vimeo, etc.)
+    else if (data.mediaSource === 'iframe' && data.url) {
+        loadGenericIframe(data.url);
+        updateStatus(`Synced with ${data.mediaType || 'media'}`, '✅');
+    }
 });
+
+// Show unmute button overlay
+function showUnmutePrompt() {
+    // Remove any existing prompt
+    const existing = document.getElementById('autoplayPrompt');
+    if (existing) existing.remove();
+
+    const unmutePrompt = document.createElement('div');
+    unmutePrompt.id = 'autoplayPrompt';
+    unmutePrompt.style.cssText = `
+        position: absolute;
+        top: 20px;
+        right: 20px;
+        background: rgba(0, 0, 0, 0.85);
+        color: white;
+        padding: 15px 25px;
+        border-radius: 10px;
+        z-index: 1000;
+        cursor: pointer;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        transition: all 0.3s ease;
+    `;
+    unmutePrompt.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 1.5rem;">🔇</span>
+            <span style="font-size: 1rem; font-weight: 600;">Click to unmute</span>
+        </div>
+    `;
+
+    unmutePrompt.addEventListener('mouseenter', () => {
+        unmutePrompt.style.background = 'rgba(102, 126, 234, 0.9)';
+    });
+
+    unmutePrompt.addEventListener('mouseleave', () => {
+        unmutePrompt.style.background = 'rgba(0, 0, 0, 0.85)';
+    });
+
+    unmutePrompt.addEventListener('click', () => {
+        if (player && player.unMute) {
+            player.unMute();
+            unmutePrompt.remove();
+            updateStatus('Playing', '▶️');
+        }
+    });
+
+    const playerWrapper = document.querySelector('.player-wrapper');
+    playerWrapper.appendChild(unmutePrompt);
+
+    // Auto-remove after 10 seconds
+    setTimeout(() => {
+        if (unmutePrompt.parentElement) {
+            unmutePrompt.remove();
+        }
+    }, 10000);
+}
+
+// Show play button overlay when autoplay is completely blocked
+function showPlayPrompt() {
+    const playPrompt = document.createElement('div');
+    playPrompt.id = 'autoplayPrompt';
+    playPrompt.style.cssText = `
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(0, 0, 0, 0.9);
+        color: white;
+        padding: 25px 45px;
+        border-radius: 12px;
+        z-index: 1000;
+        text-align: center;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+    `;
+    playPrompt.innerHTML = `
+        <div style="font-size: 1.3rem; margin-bottom: 15px;">▶️ Click to start playback</div>
+        <button id="manualPlayBtn" style="
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 14px 35px;
+            border-radius: 8px;
+            font-size: 1.1rem;
+            cursor: pointer;
+            font-weight: 600;
+            transition: background 0.3s ease;
+        ">Play Video</button>
+    `;
+
+    const playerWrapper = document.querySelector('.player-wrapper');
+    playerWrapper.appendChild(playPrompt);
+
+    const playBtn = document.getElementById('manualPlayBtn');
+    playBtn.addEventListener('mouseenter', () => {
+        playBtn.style.background = '#5568d3';
+    });
+    playBtn.addEventListener('mouseleave', () => {
+        playBtn.style.background = '#667eea';
+    });
+
+    playBtn.addEventListener('click', async () => {
+        try {
+            await player.playVideo();
+            requestWakeLock();
+            playPrompt.remove();
+            updateStatus('Playing', '▶️');
+        } catch (e) {
+            console.error('Failed to play:', e);
+            alert('Unable to start playback. Please try using the play button below.');
+        }
+    });
+
+    updateStatus('Click to start playback', '⏸️');
+}
 
 // Chat event handlers
 socket.on('chatMessage', (data) => {
@@ -794,3 +1006,113 @@ setInterval(() => {
 setInterval(() => {
     updateMediaSessionPosition();
 }, 5000);
+
+// ============================================
+// iOS Safari Background Audio Fix
+// ============================================
+
+// Detect iOS Safari
+const isIOSSafari = () => {
+    const ua = navigator.userAgent;
+    const iOS = /iPad|iPhone|iPod/.test(ua);
+    const webkit = /WebKit/.test(ua);
+    const notChrome = !ua.match(/CriOS/i);
+    return iOS && webkit && notChrome;
+};
+
+// Handle visibility change for iOS Safari
+document.addEventListener('visibilitychange', () => {
+    console.log('Visibility changed:', document.hidden ? 'hidden' : 'visible');
+
+    if (player && player.getPlayerState) {
+        const playerState = player.getPlayerState();
+
+        if (!document.hidden && playerState === YT.PlayerState.PLAYING) {
+            console.log('Page visible, ensuring playback continues');
+            updateMediaSessionPosition();
+        } else if (document.hidden && playerState === YT.PlayerState.PLAYING) {
+            console.log('Page hidden - iOS background audio active');
+            const videoData = player.getVideoData();
+            if (videoData && videoData.video_id) {
+                updateMediaSession(videoData);
+            }
+        }
+    }
+});
+
+// iOS Safari: Handle page hide/show events
+window.addEventListener('pagehide', () => {
+    console.log('Page hide event');
+});
+
+window.addEventListener('pageshow', () => {
+    console.log('Page show event');
+    if (player && player.getPlayerState && player.getPlayerState() === YT.PlayerState.PLAYING) {
+        updateMediaSessionPosition();
+    }
+});
+
+// iOS Safari: Initialize audio context for background audio
+let audioContextInitialized = false;
+
+function initializeAudioContextForIOS() {
+    if (isIOSSafari() && !audioContextInitialized) {
+        try {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            if (AudioContext) {
+                const audioCtx = new AudioContext();
+                audioCtx.resume().then(() => {
+                    console.log('AudioContext initialized for iOS background audio');
+                    audioContextInitialized = true;
+
+                    setInterval(() => {
+                        if (audioCtx.state === 'suspended') {
+                            audioCtx.resume();
+                        }
+                    }, 5000);
+                });
+            }
+        } catch (err) {
+            console.log('AudioContext initialization failed:', err);
+        }
+    }
+}
+
+document.addEventListener('click', initializeAudioContextForIOS, { once: true });
+document.addEventListener('touchstart', initializeAudioContextForIOS, { once: true });
+
+// iOS Safari specific enhancements
+if (isIOSSafari()) {
+    console.log('iOS Safari detected - Enhanced background audio enabled');
+
+    setInterval(() => {
+        if (player && player.getPlayerState && player.getPlayerState() === YT.PlayerState.PLAYING) {
+            const videoData = player.getVideoData();
+            if (videoData && videoData.video_id) {
+                updateMediaSession(videoData);
+                updateMediaSessionPosition();
+            }
+        }
+    }, 3000);
+
+    window.addEventListener('blur', () => {
+        console.log('Window blur (iOS) - maintaining playback');
+        if (player && player.getPlayerState && player.getPlayerState() === YT.PlayerState.PLAYING) {
+            setTimeout(() => {
+                const videoData = player.getVideoData();
+                if (videoData && videoData.video_id) {
+                    updateMediaSession(videoData);
+                }
+            }, 100);
+        }
+    });
+
+    window.addEventListener('focus', () => {
+        console.log('Window focus (iOS)');
+        if (player && player.getPlayerState && player.getPlayerState() === YT.PlayerState.PLAYING) {
+            updateMediaSessionPosition();
+        }
+    });
+}
+
+console.log('iOS Background Audio: ' + (isIOSSafari() ? 'ACTIVE' : 'Not needed'));
